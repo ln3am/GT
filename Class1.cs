@@ -8,27 +8,38 @@ using Tesseract;
 using System.Text.RegularExpressions;
 using System.Text;
 using System.Windows.Threading;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.Collections.Generic;
+using System.Linq;
+using System.Diagnostics;
+using System.Windows.Input;
+using System.Globalization;
 
 namespace GT
 {
     public class GravTime
     {
+        string path = AppDomain.CurrentDomain.BaseDirectory;
         GetBitMap getmap = new GetBitMap();
         ProcessScreenshot process = new ProcessScreenshot();
-        DataToChart chart = new DataToChart();
-        public event Action<Bitmap> ScreenshotCaptured;
+        DataToValue chart = new DataToValue();
         private string result1 = "";
         private System.Windows.Controls.TextBox textbox1;
         private System.Windows.Controls.TextBox textbox2;
         Dispatcher mdispatcher;
-        public event Action<string> ResultProcessed;
-       
+        public event Action<string, bool> ResultProcessed;
+        private Dictionary<string, double> mapstime = new Dictionary<string, double>();
+        private Dictionary<string, double> gravmapstimes = new Dictionary<string, double>();
+        private double optimaltime = 0;
+
         public void OnStart(System.Windows.Controls.TextBox text1, System.Windows.Controls.TextBox text2, Dispatcher maindispatcher)
         {
             mdispatcher = maindispatcher;
             textbox1 = text1;
             textbox2 = text2;
-            getmap.Write("Service is started at " + DateTime.Now, textbox1, 0.1);
+            getmap.Write("Service was started at " + DateTime.Now, textbox1, 0.1);
+            gravmapstimes = GetTimes();
             getmap.ScreenshotCaptured += OnScreenshotCaptured;
             ResultProcessed += OnResultProcessed;
             getmap.TakeScreenShot(textbox1);
@@ -36,30 +47,62 @@ namespace GT
         public void OnStop()
         {
             getmap.Stoptimer();
-            getmap.Write("Service is stopped at " + DateTime.Now, textbox1, 0.1);
+            getmap.Write("\nService was stopped at " + DateTime.Now, textbox1, 0.1);
+        }
+        private void OnResultProcessed(string result, bool istextbox1)
+        {
+            System.Windows.Controls.TextBox textboxx = istextbox1 ? textbox1 : textbox2;
+            mdispatcher.Invoke(() => getmap.Write(result, textboxx, 0.1));
+        }
+        public void RaiseResultProcessed(string result, bool istextbox1)
+        {
+            ResultProcessed?.Invoke(result, istextbox1);
         }
         private async void OnScreenshotCaptured(Bitmap screenshot)
         {
-            Task<string> processingTask = process.ProcesScreenshot(screenshot);
-            string result = await processingTask;
+            RaiseResultProcessed("\nScreenshot was converted at " + DateTime.Now, true);
+            Task<string> asyncprocessingTask = process.ProcesScreenshot(screenshot);
+            string result = await asyncprocessingTask;
             if (result.ToLower() == result1)
             {
                 return;
             }
             result1 = result.ToLower();
-           // if (result1.Contains("you finished all maps") || result1.Contains("the winning maps are"))
-           // {
-                RaiseResultProcessed(result);
-                chart.Data(result1, textbox2);
-            //};
+            if (result1.Contains("finished all maps") || result1.Contains("winning maps"))
+            {
+                if (result1.Contains("winning maps"))
+                {
+                    mapstime.Clear();
+                }
+               // Trace.WriteLine(result1);
+                Task<Dictionary<string, double>> asyncprocessingTask2 = chart.Data(result1, mapstime, gravmapstimes);
+                mapstime = await asyncprocessingTask2;
+                if (mapstime.Count == 5 && !mapstime.ContainsValue(00.000))
+                {
+                    string maps = "";
+                    double maptimereached = 0;
+                    foreach (var key in mapstime.Keys) 
+                    {
+                        optimaltime += gravmapstimes[key];
+                        maps += key + " ";
+                        maptimereached = mapstime[key];
+                    }
+                    RaiseResultProcessed($"finished {maps} in {maptimereached.ToString(CultureInfo.InvariantCulture)} seconds.\nOptimal Time to reach is around {optimaltime.ToString(CultureInfo.InvariantCulture)} seconds", false);
+                    mapstime.Clear();
+                }
+            }
         }
-        private void OnResultProcessed(string result)
+        private Dictionary<string, double> GetTimes()
         {
-            mdispatcher.Invoke(() => getmap.Write(result, textbox2, 0.1));
-        }
-        private void RaiseResultProcessed(string result)
-        {
-            ResultProcessed?.Invoke(result);
+            Dictionary<string, double> Gravtimes = new Dictionary<string, double>();
+            string[] lines = File.ReadAllLines(Path.Combine(path, "gravitytimemaps.txt"));
+            foreach (var line in lines)
+            {
+               // Trace.WriteLine(line);
+                string[] lineparts = line.Split(" ");
+                Gravtimes.Add(lineparts[0], double.Parse(lineparts[1]));
+            }
+            return Gravtimes;
         }
     }
     public class GetBitMap
@@ -73,7 +116,7 @@ namespace GT
             {
                 OnElapsedTime(textbox1);
             };
-            timer.Interval = 10000;
+            timer.Interval = 1000;
             timer.Start();
         }
         public void Stoptimer()
@@ -83,12 +126,28 @@ namespace GT
         private void OnElapsedTime(System.Windows.Controls.TextBox textbox1)
         {
             Rectangle bounds = Screen.PrimaryScreen.Bounds;
-            screenshot = new Bitmap(bounds.Width, bounds.Height);
+            int captureWidth = (int)(bounds.Width * 0.6);
+            int captureHeight = bounds.Height;
+            Bitmap screenshot = new Bitmap(captureWidth, captureHeight);
             using (Graphics graphics = Graphics.FromImage(screenshot))
             {
                 graphics.CopyFromScreen(bounds.Left, bounds.Top, 0, 0, bounds.Size);
             }
-            ScreenshotCaptured?.Invoke(screenshot);
+            using (var upscaledScreenshot = UpscaleAndGrayscaleImage(screenshot, 2.0f))
+            {
+                ScreenshotCaptured?.Invoke(upscaledScreenshot);
+            }
+            screenshot.Dispose();
+        }
+        private Bitmap UpscaleAndGrayscaleImage(Bitmap original, float scaleFactor)
+        {
+            var upscaled = new Bitmap((int)(original.Width * scaleFactor), (int)(original.Height * scaleFactor));
+            using (var graphics = Graphics.FromImage(upscaled))
+            {
+                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                graphics.DrawImage(original, 0, 0, upscaled.Width, upscaled.Height);
+            }
+            return upscaled;
         }
         public void Write(string message, System.Windows.Controls.TextBox textbox, double writespeed)
         {
@@ -128,22 +187,52 @@ namespace GT
                     using (var page = engine.Process(image))
                     {
                         var text = page.GetText();
+                        screnshot.Dispose();
+                        image.Dispose();
+                        page.Dispose();
                         return text;
                     }
                 }
             }
         }
     }
-    public class DataToChart
+    public class DataToValue
     {
-        GetBitMap map = new GetBitMap();
-        public async Task Data(string screentext, System.Windows.Controls.TextBox textbox2)
+        public async Task<Dictionary<string, double>> Data(string screentext, Dictionary<string, double> maptimes, Dictionary<string, double> gravmapstimes)
         {
-            string[] words = screentext.Split(" ");
+            string timepattern = @"[{\[\(]\d{2}[:;]\d{2}[.,]\d{3}[}\]\)]";
+            char[] delimiters = new char[] { ' ', '\n', '\r' };
+            string[] words = screentext.Split(delimiters, StringSplitOptions.RemoveEmptyEntries);
             foreach (string word in words)
             {
-
+                if (Regex.IsMatch(word, timepattern))
+                {
+                   // Trace.WriteLine(word + " match");
+                    string timestring = word.Substring(4, 2) + '.' + word.Substring(7, 3);
+                    if (maptimes.Count == 5)
+                    {
+                        foreach (var key in maptimes.Keys.ToList())
+                        {
+                            maptimes[key] = Double.Parse(timestring);
+                        }
+                    }
+                }
+                StringBuilder stringBuilder = new StringBuilder();
+                foreach (char c in word)
+                {
+                    if (char.IsLetter(c))
+                    {
+                        stringBuilder.Append(c);
+                    }
+                }
+                string letterword = stringBuilder.ToString();
+                if (gravmapstimes.ContainsKey(letterword) && !maptimes.ContainsKey(letterword))
+                {
+                   // Trace.WriteLine(letterword + " containskey");
+                    maptimes.Add(letterword, 00.000);
+                }
             }
+            return maptimes;
         }
     }
     public class ControlWriter : TextWriter
