@@ -31,7 +31,7 @@ namespace GT
         public event Action<string, bool> ResultProcessed;
         private Dictionary<string, double> mapstime = new Dictionary<string, double>();
         private Dictionary<string, double> gravmapstimes = new Dictionary<string, double>();
-        private double optimaltime = 0;
+        Dictionary<string, double> copylastinstance = new Dictionary<string, double> { { " ", 0 } };
 
         public void OnStart(System.Windows.Controls.TextBox text1, System.Windows.Controls.TextBox text2, Dispatcher maindispatcher)
         {
@@ -60,7 +60,6 @@ namespace GT
         }
         private async void OnScreenshotCaptured(Bitmap screenshot)
         {
-            RaiseResultProcessed("\nScreenshot was converted at " + DateTime.Now, true);
             Task<string> asyncprocessingTask = process.ProcesScreenshot(screenshot);
             string result = await asyncprocessingTask;
             if (result.ToLower() == result1)
@@ -68,18 +67,20 @@ namespace GT
                 return;
             }
             result1 = result.ToLower();
-            if (result1.Contains("finished all maps") || result1.Contains("winning maps"))
+            if (result1.Contains("you finished all maps") || result1.Contains("winning maps"))
             {
                 if (result1.Contains("winning maps"))
                 {
                     mapstime.Clear();
                 }
-               // Trace.WriteLine(result1);
+                //Trace.WriteLine(result1);
                 Task<Dictionary<string, double>> asyncprocessingTask2 = chart.Data(result1, mapstime, gravmapstimes);
                 mapstime = await asyncprocessingTask2;
-                if (mapstime.Count == 5 && !mapstime.ContainsValue(00.000))
+                if (mapstime.Count == 5 && !mapstime.ContainsValue(00.000) && mapstime != copylastinstance)
                 {
+                    copylastinstance = mapstime;
                     string maps = "";
+                    double optimaltime = 0;
                     double maptimereached = 0;
                     foreach (var key in mapstime.Keys) 
                     {
@@ -87,7 +88,9 @@ namespace GT
                         maps += key + " ";
                         maptimereached = mapstime[key];
                     }
-                    RaiseResultProcessed($"finished {maps} in {maptimereached.ToString(CultureInfo.InvariantCulture)} seconds.\nOptimal Time to reach is around {optimaltime.ToString(CultureInfo.InvariantCulture)} seconds", false);
+                    string maptimereachedstring = maptimereached.ToString();
+                    string optimaltimestring = optimaltime.ToString();
+                    RaiseResultProcessed($"\nfinished {maps} in {maptimereachedstring.Substring(0, 2) + "." + maptimereachedstring.Substring(2, 3)} seconds.\nOptimal Time to reach is around {optimaltimestring.Substring(0, 2) + "." + optimaltimestring.Substring(2, 3)} seconds", false);
                     mapstime.Clear();
                 }
             }
@@ -125,19 +128,25 @@ namespace GT
         }
         private void OnElapsedTime(System.Windows.Controls.TextBox textbox1)
         {
-            Rectangle bounds = Screen.PrimaryScreen.Bounds;
-            int captureWidth = (int)(bounds.Width * 0.6);
-            int captureHeight = bounds.Height;
-            Bitmap screenshot = new Bitmap(captureWidth, captureHeight);
-            using (Graphics graphics = Graphics.FromImage(screenshot))
+            Task.Run(() =>
             {
-                graphics.CopyFromScreen(bounds.Left, bounds.Top, 0, 0, bounds.Size);
-            }
-            using (var upscaledScreenshot = UpscaleAndGrayscaleImage(screenshot, 2.0f))
-            {
-                ScreenshotCaptured?.Invoke(upscaledScreenshot);
-            }
-            screenshot.Dispose();
+                Rectangle bounds = Screen.PrimaryScreen.Bounds;
+                int captureWidth = bounds.Width / 2;
+                int captureHeight = bounds.Height / 2;
+
+                using (Bitmap screenshot = new Bitmap(captureWidth, captureHeight))
+                {
+                    using (Graphics graphics = Graphics.FromImage(screenshot))
+                    {
+                        graphics.CopyFromScreen(bounds.Left, bounds.Top, 0, 0, new Size(captureWidth, captureHeight));
+                    }
+                    using (var upscaledScreenshot = UpscaleAndGrayscaleImage(screenshot, 2.0f))
+                    {
+                       ScreenshotCaptured?.Invoke(upscaledScreenshot);
+                        
+                    }
+                }
+            });
         }
         private Bitmap UpscaleAndGrayscaleImage(Bitmap original, float scaleFactor)
         {
@@ -173,7 +182,6 @@ namespace GT
                 }
             }
             cw.Write(message);
-
         }
     }
     public class ProcessScreenshot
@@ -201,13 +209,13 @@ namespace GT
         public async Task<Dictionary<string, double>> Data(string screentext, Dictionary<string, double> maptimes, Dictionary<string, double> gravmapstimes)
         {
             string timepattern = @"[{\[\(]\d{2}[:;]\d{2}[.,]\d{3}[}\]\)]";
-            char[] delimiters = new char[] { ' ', '\n', '\r' };
+            char[] delimiters = new char[] { ' ', '\n', '\r', '!', ',' };
             string[] words = screentext.Split(delimiters, StringSplitOptions.RemoveEmptyEntries);
             foreach (string word in words)
             {
                 if (Regex.IsMatch(word, timepattern))
                 {
-                   // Trace.WriteLine(word + " match");
+                    Trace.WriteLine(word + " match");
                     string timestring = word.Substring(4, 2) + '.' + word.Substring(7, 3);
                     if (maptimes.Count == 5)
                     {
@@ -228,7 +236,7 @@ namespace GT
                 string letterword = stringBuilder.ToString();
                 if (gravmapstimes.ContainsKey(letterword) && !maptimes.ContainsKey(letterword))
                 {
-                   // Trace.WriteLine(letterword + " containskey");
+                    Trace.WriteLine(letterword + " containskey");
                     maptimes.Add(letterword, 00.000);
                 }
             }

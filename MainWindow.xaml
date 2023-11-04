@@ -11,7 +11,7 @@
     <Window.Resources>
         <Style x:Key="outPutText" TargetType="{x:Type TextBox}">
             <Setter Property="Foreground" Value="CornflowerBlue"/>
-            <Setter Property="FontSize" Value="15"/>
+            <Setter Property="FontSize" Value="10"/>
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="TextAlignment" Value="Left"/>
         </Style>
