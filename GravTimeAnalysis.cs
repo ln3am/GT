@@ -22,7 +22,6 @@ namespace GT
         string path = AppDomain.CurrentDomain.BaseDirectory;
         GetBitMap getmap = new GetBitMap();
         ProcessScreenshot process = new ProcessScreenshot();
-        DataToValue chart = new DataToValue();
         private string result1 = "";
         private System.Windows.Controls.TextBox textbox1;
         private System.Windows.Controls.TextBox textbox2;
@@ -30,10 +29,8 @@ namespace GT
         public event Action<string, bool> ResultProcessed;
         private Dictionary<string, double> mapstime = new Dictionary<string, double>();
         private Dictionary<string, double> gravmapstimes = new Dictionary<string, double>();
-        Dictionary<string, double> copylastinstance = new Dictionary<string, double> { { " ", 0 } };
-        private SemaphoreSlim _semaphore = new SemaphoreSlim(1, 1);
-        private Queue<TaskCompletionSource<bool>> _taskQueue = new Queue<TaskCompletionSource<bool>>();
-        private object _queueLock = new object();
+        private TaskQueueProcessor _processor = new TaskQueueProcessor();
+        private Dictionary<string, double> copylastinstance = new Dictionary<string, double>();
 
         public void OnStart(System.Windows.Controls.TextBox text1, System.Windows.Controls.TextBox text2, Dispatcher maindispatcher)
         {
@@ -70,60 +67,35 @@ namespace GT
         {
             ResultProcessed?.Invoke(result, istextbox1);
         }
+
         private async Task OnScreenshotCaptured(Bitmap screenshot)
         {
-            var tcs = new TaskCompletionSource<bool>();
-
-            lock (_queueLock)
-            {
-                _taskQueue.Enqueue(tcs);
-                if (_taskQueue.Count > 1) return;
-            }
-            while (true)
-            {
-                await _semaphore.WaitAsync();
-                try
-                {
-                    string result = process.ProcesScreenshot(screenshot);
-                    if (!(result.ToLower() == result1))
+              string result = process.ProcesScreenshot(screenshot);
+              if (!(result.ToLower() == result1))
+              {
+                    result1 = result.ToLower();
+                    if (result1.Contains("you finished") && result1.Contains("winning maps"))
                     {
-                        result1 = result.ToLower();
-                        if (result1.Contains("you finished") && result1.Contains("winning maps"))
-                        {
-                            mapstime = chart.Data(result1, mapstime, gravmapstimes);
-                            if (mapstime.Count == 5 && !mapstime.ContainsValue(00.000) && mapstime != copylastinstance)
+                        Dictionary<string, double> mapstimeback = await _processor.EnqueueTaskAsync(result1, mapstime, gravmapstimes);
+                        if (mapstimeback.Count == 5 && !mapstimeback.ContainsValue(0) && mapstimeback != copylastinstance)
                             {
-                                copylastinstance = mapstime;
-                                string maps = "";
-                                double optimaltime = 0;
-                                double maptimereached = 0;
-                                foreach (var key in mapstime.Keys)
-                                {
-                                    optimaltime += gravmapstimes[key];
-                                    maps += key + " ";
-                                    maptimereached = mapstime[key];
-                                }
-                                string maptimereachedstring = maptimereached.ToString();
-                                string optimaltimestring = optimaltime.ToString();
-                                RaiseResultProcessed($"\nfinished {maps} in {maptimereachedstring.Substring(0, 2) + "." + maptimereachedstring.Substring(2, 3)} seconds.\nOptimal Time to reach is around {optimaltimestring.Substring(0, 2) + "." + optimaltimestring.Substring(2, 3)} seconds", false);
-                                mapstime.Clear();
+                            copylastinstance = mapstimeback;
+                            string maps = "";
+                            double optimaltime = 0;
+                            double maptimereached = 0;
+                            foreach (var key in mapstimeback.Keys)
+                            {
+                                optimaltime += gravmapstimes[key];
+                                maps += key + " ";
+                                maptimereached = mapstimeback[key];
                             }
+                            string maptimereachedstring = maptimereached.ToString();
+                            string optimaltimestring = optimaltime.ToString();
+                            RaiseResultProcessed($"\nfinished {maps} in {maptimereachedstring.Substring(0, 2) + "." + maptimereachedstring.Substring(2, 3)} seconds.\nOptimal Time to reach is around {optimaltimestring.Substring(0, 2) + "." + optimaltimestring.Substring(2, 3)} seconds", false);
+                            mapstime.Clear();
                         }
                     }
-                    tcs.SetResult(true);
-                }
-                finally
-                {
-                    _semaphore.Release();
-                }
-                lock (_queueLock)
-                {
-                    _taskQueue.Dequeue();
-
-                    if (_taskQueue.Count == 0) break; 
-                    _taskQueue.Peek().SetResult(true);
-                }
-            }
+              }
         }
         private Dictionary<string, double> GetTimes()
         {
@@ -131,11 +103,38 @@ namespace GT
             string[] lines = File.ReadAllLines(Path.Combine(path, "gravitytimemaps.txt"));
             foreach (var line in lines)
             {
-               // Trace.WriteLine(line);
+                // Trace.WriteLine(line);
                 string[] lineparts = line.Split(" ");
                 Gravtimes.Add(lineparts[0], double.Parse(lineparts[1]));
             }
             return Gravtimes;
+        }
+    }
+    public class TaskQueueProcessor
+    {
+        DataToValue chart = new DataToValue();
+        private readonly object _queueLock = new object();
+        private volatile bool _isProcessing = false;
+        public async Task<Dictionary<string, double>> EnqueueTaskAsync(string result1, Dictionary<string, double> maptime, Dictionary<string, double> bestmaptime)
+        {
+            lock (_queueLock)
+            {
+                if (_isProcessing)
+                {
+                    maptime.Clear();
+                    return maptime;
+                }
+                _isProcessing = true;
+            }
+            try
+            {
+                maptime = chart.Data(result1, maptime, bestmaptime);
+                return maptime;
+            }
+            finally
+            {
+                _isProcessing = false;
+            }
         }
     }
     public class GetBitMap
@@ -149,7 +148,7 @@ namespace GT
             {
                 OnElapsedTime(textbox1);
             };
-            timer.Interval = 10000;
+            timer.Interval = 2000;
             timer.Start();
         }
         public void Stoptimer()
@@ -266,7 +265,7 @@ namespace GT
             foreach (string word in words)
             {
                 wordsequenz += word;
-                if (wordsequenz.Contains("you finished"))
+                if (wordsequenz.Contains("youfinished"))
                 {
                     containsyou = true;
                 }
@@ -274,7 +273,7 @@ namespace GT
                 {
                     Trace.WriteLine(word + " match");
                     string timestring = word.Substring(4, 2) + '.' + word.Substring(7, 3);
-                    if (maptimes.Count == 5 && maptimes.ContainsValue(00.000) && containsyou)
+                    if (maptimes.Count == 5 && maptimes.ContainsValue(0) && containsyou)
                     {
                         foreach (var key in maptimes.Keys.ToList())
                         {
@@ -285,7 +284,7 @@ namespace GT
                 if (gravmapstimes.ContainsKey(word) && !maptimes.ContainsKey(word))
                 {
                     Trace.WriteLine(word + " containskey");
-                    maptimes.Add(word, 00.000);
+                    maptimes.Add(word, 0);
                 }
             }
             return maptimes;
