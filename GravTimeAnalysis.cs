@@ -13,8 +13,7 @@ using System.Drawing.Imaging;
 using System.Collections.Generic;
 using System.Linq;
 using System.Diagnostics;
-using System.Windows.Input;
-using System.Globalization;
+using System.Threading;
 
 namespace GT
 {
@@ -32,6 +31,9 @@ namespace GT
         private Dictionary<string, double> mapstime = new Dictionary<string, double>();
         private Dictionary<string, double> gravmapstimes = new Dictionary<string, double>();
         Dictionary<string, double> copylastinstance = new Dictionary<string, double> { { " ", 0 } };
+        private SemaphoreSlim _semaphore = new SemaphoreSlim(1, 1);
+        private Queue<TaskCompletionSource<bool>> _taskQueue = new Queue<TaskCompletionSource<bool>>();
+        private object _queueLock = new object();
 
         public void OnStart(System.Windows.Controls.TextBox text1, System.Windows.Controls.TextBox text2, Dispatcher maindispatcher)
         {
@@ -40,7 +42,17 @@ namespace GT
             textbox2 = text2;
             getmap.Write("Service was started at " + DateTime.Now, textbox1, 0.1);
             gravmapstimes = GetTimes();
-            getmap.ScreenshotCaptured += OnScreenshotCaptured;
+            getmap.ScreenshotCaptured += async (screenshot) =>
+            {
+                try
+                {
+                    await OnScreenshotCaptured(screenshot);
+                }
+                catch (Exception ex)
+                {
+                    Trace.WriteLine($"Exception in async event handler: {ex}");
+                }
+            };
             ResultProcessed += OnResultProcessed;
             getmap.TakeScreenShot(textbox1);
         }
@@ -58,40 +70,58 @@ namespace GT
         {
             ResultProcessed?.Invoke(result, istextbox1);
         }
-        private async void OnScreenshotCaptured(Bitmap screenshot)
+        private async Task OnScreenshotCaptured(Bitmap screenshot)
         {
-            Task<string> asyncprocessingTask = process.ProcesScreenshot(screenshot);
-            string result = await asyncprocessingTask;
-            if (result.ToLower() == result1)
+            var tcs = new TaskCompletionSource<bool>();
+
+            lock (_queueLock)
             {
-                return;
+                _taskQueue.Enqueue(tcs);
+                if (_taskQueue.Count > 1) return;
             }
-            result1 = result.ToLower();
-            if (result1.Contains("you finished all maps") || result1.Contains("winning maps"))
+            while (true)
             {
-                if (result1.Contains("winning maps"))
+                await _semaphore.WaitAsync();
+                try
                 {
-                    mapstime.Clear();
-                }
-                //Trace.WriteLine(result1);
-                Task<Dictionary<string, double>> asyncprocessingTask2 = chart.Data(result1, mapstime, gravmapstimes);
-                mapstime = await asyncprocessingTask2;
-                if (mapstime.Count == 5 && !mapstime.ContainsValue(00.000) && mapstime != copylastinstance)
-                {
-                    copylastinstance = mapstime;
-                    string maps = "";
-                    double optimaltime = 0;
-                    double maptimereached = 0;
-                    foreach (var key in mapstime.Keys) 
+                    string result = process.ProcesScreenshot(screenshot);
+                    if (!(result.ToLower() == result1))
                     {
-                        optimaltime += gravmapstimes[key];
-                        maps += key + " ";
-                        maptimereached = mapstime[key];
+                        result1 = result.ToLower();
+                        if (result1.Contains("you finished") && result1.Contains("winning maps"))
+                        {
+                            mapstime = chart.Data(result1, mapstime, gravmapstimes);
+                            if (mapstime.Count == 5 && !mapstime.ContainsValue(00.000) && mapstime != copylastinstance)
+                            {
+                                copylastinstance = mapstime;
+                                string maps = "";
+                                double optimaltime = 0;
+                                double maptimereached = 0;
+                                foreach (var key in mapstime.Keys)
+                                {
+                                    optimaltime += gravmapstimes[key];
+                                    maps += key + " ";
+                                    maptimereached = mapstime[key];
+                                }
+                                string maptimereachedstring = maptimereached.ToString();
+                                string optimaltimestring = optimaltime.ToString();
+                                RaiseResultProcessed($"\nfinished {maps} in {maptimereachedstring.Substring(0, 2) + "." + maptimereachedstring.Substring(2, 3)} seconds.\nOptimal Time to reach is around {optimaltimestring.Substring(0, 2) + "." + optimaltimestring.Substring(2, 3)} seconds", false);
+                                mapstime.Clear();
+                            }
+                        }
                     }
-                    string maptimereachedstring = maptimereached.ToString();
-                    string optimaltimestring = optimaltime.ToString();
-                    RaiseResultProcessed($"\nfinished {maps} in {maptimereachedstring.Substring(0, 2) + "." + maptimereachedstring.Substring(2, 3)} seconds.\nOptimal Time to reach is around {optimaltimestring.Substring(0, 2) + "." + optimaltimestring.Substring(2, 3)} seconds", false);
-                    mapstime.Clear();
+                    tcs.SetResult(true);
+                }
+                finally
+                {
+                    _semaphore.Release();
+                }
+                lock (_queueLock)
+                {
+                    _taskQueue.Dequeue();
+
+                    if (_taskQueue.Count == 0) break; 
+                    _taskQueue.Peek().SetResult(true);
                 }
             }
         }
@@ -119,7 +149,7 @@ namespace GT
             {
                 OnElapsedTime(textbox1);
             };
-            timer.Interval = 1000;
+            timer.Interval = 10000;
             timer.Start();
         }
         public void Stoptimer()
@@ -130,9 +160,9 @@ namespace GT
         {
             Task.Run(() =>
             {
-                Rectangle bounds = Screen.PrimaryScreen.Bounds;
-                int captureWidth = bounds.Width / 2;
-                int captureHeight = bounds.Height / 2;
+            Rectangle bounds = Screen.PrimaryScreen.Bounds;
+            int captureWidth = bounds.Width;
+            int captureHeight = bounds.Height;
 
                 using (Bitmap screenshot = new Bitmap(captureWidth, captureHeight))
                 {
@@ -143,7 +173,6 @@ namespace GT
                     using (var upscaledScreenshot = UpscaleAndGrayscaleImage(screenshot, 2.0f))
                     {
                        ScreenshotCaptured?.Invoke(upscaledScreenshot);
-                        
                     }
                 }
             });
@@ -156,7 +185,27 @@ namespace GT
                 graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
                 graphics.DrawImage(original, 0, 0, upscaled.Width, upscaled.Height);
             }
-            return upscaled;
+            var grayscale = new Bitmap(upscaled.Width, upscaled.Height);
+            using (var graphics = Graphics.FromImage(grayscale))
+            {
+                ColorMatrix colorMatrix = new ColorMatrix(
+                    new float[][]
+                    {
+                new float[] {.3f, .3f, .3f, 0, 0},
+                new float[] {.59f, .59f, .59f, 0, 0},
+                new float[] {.11f, .11f, .11f, 0, 0},
+                new float[] {0, 0, 0, 1, 0},
+                new float[] {0, 0, 0, 0, 1}
+                    });
+                using (ImageAttributes attributes = new ImageAttributes())
+                {
+                    attributes.SetColorMatrix(colorMatrix);
+                    graphics.DrawImage(upscaled, new Rectangle(0, 0, upscaled.Width, upscaled.Height),
+                        0, 0, upscaled.Width, upscaled.Height, GraphicsUnit.Pixel, attributes);
+                }
+            }
+            upscaled.Dispose();
+            return grayscale;
         }
         public void Write(string message, System.Windows.Controls.TextBox textbox, double writespeed)
         {
@@ -186,7 +235,7 @@ namespace GT
     }
     public class ProcessScreenshot
     {
-        public async Task<string> ProcesScreenshot(Bitmap screnshot)
+        public string ProcesScreenshot(Bitmap screnshot)
         {
             using (var engine = new TesseractEngine(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tessdata"), "eng", EngineMode.Default))
             {
@@ -206,18 +255,26 @@ namespace GT
     }
     public class DataToValue
     {
-        public async Task<Dictionary<string, double>> Data(string screentext, Dictionary<string, double> maptimes, Dictionary<string, double> gravmapstimes)
+        public Dictionary<string, double> Data(string screentext, Dictionary<string, double> maptimes, Dictionary<string, double> gravmapstimes)
         {
             string timepattern = @"[{\[\(]\d{2}[:;]\d{2}[.,]\d{3}[}\]\)]";
             char[] delimiters = new char[] { ' ', '\n', '\r', '!', ',' };
+            bool containsyou = false;
+            maptimes.Clear();
             string[] words = screentext.Split(delimiters, StringSplitOptions.RemoveEmptyEntries);
+            string wordsequenz = "";
             foreach (string word in words)
             {
+                wordsequenz += word;
+                if (wordsequenz.Contains("you finished"))
+                {
+                    containsyou = true;
+                }
                 if (Regex.IsMatch(word, timepattern))
                 {
                     Trace.WriteLine(word + " match");
                     string timestring = word.Substring(4, 2) + '.' + word.Substring(7, 3);
-                    if (maptimes.Count == 5)
+                    if (maptimes.Count == 5 && maptimes.ContainsValue(00.000) && containsyou)
                     {
                         foreach (var key in maptimes.Keys.ToList())
                         {
@@ -225,19 +282,10 @@ namespace GT
                         }
                     }
                 }
-                StringBuilder stringBuilder = new StringBuilder();
-                foreach (char c in word)
+                if (gravmapstimes.ContainsKey(word) && !maptimes.ContainsKey(word))
                 {
-                    if (char.IsLetter(c))
-                    {
-                        stringBuilder.Append(c);
-                    }
-                }
-                string letterword = stringBuilder.ToString();
-                if (gravmapstimes.ContainsKey(letterword) && !maptimes.ContainsKey(letterword))
-                {
-                    Trace.WriteLine(letterword + " containskey");
-                    maptimes.Add(letterword, 00.000);
+                    Trace.WriteLine(word + " containskey");
+                    maptimes.Add(word, 00.000);
                 }
             }
             return maptimes;
