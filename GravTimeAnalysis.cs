@@ -14,12 +14,14 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Diagnostics;
 using System.Threading;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.TaskbarClock;
 
 namespace GT
 {
     public class GravTime
     {
         string path = AppDomain.CurrentDomain.BaseDirectory;
+        //leads to GT\bin\ebug\net7.0-windows\
         GetBitMap getmap = new GetBitMap();
         ProcessScreenshot process = new ProcessScreenshot();
         private string result1 = "";
@@ -27,18 +29,18 @@ namespace GT
         private System.Windows.Controls.TextBox textbox2;
         Dispatcher mdispatcher;
         public event Action<string, bool> ResultProcessed;
-        private Dictionary<string, double> mapstime = new Dictionary<string, double>();
         private Dictionary<string, double> gravmapstimes = new Dictionary<string, double>();
+        private Dictionary<string, double> optimalgravmapstimes = new Dictionary<string, double>();
         private TaskQueueProcessor _processor = new TaskQueueProcessor();
         private Dictionary<string, double> copylastinstance = new Dictionary<string, double>();
-
         public void OnStart(System.Windows.Controls.TextBox text1, System.Windows.Controls.TextBox text2, Dispatcher maindispatcher)
         {
             mdispatcher = maindispatcher;
             textbox1 = text1;
             textbox2 = text2;
             getmap.Write("Service was started at " + DateTime.Now, textbox1, 0.1);
-            gravmapstimes = GetTimes();
+            gravmapstimes = GetTimes("gravitytimemaps.txt");
+            optimalgravmapstimes = GetTimes("optimaltimes.txt");
             getmap.ScreenshotCaptured += async (screenshot) =>
             {
                 try
@@ -74,33 +76,52 @@ namespace GT
               if (!(result.ToLower() == result1))
               {
                     result1 = result.ToLower();
-                    if (result1.Contains("you finished") && result1.Contains("winning maps"))
+                if (result1.Contains("you finished") && result1.Contains("winning maps"))
+                {
+                    Dictionary<string, double> mapstimeback = await _processor.EnqueueTaskAsync(result1, gravmapstimes);
+                    lock (_updateLock)
                     {
-                        Dictionary<string, double> mapstimeback = await _processor.EnqueueTaskAsync(result1, mapstime, gravmapstimes);
-                        if (mapstimeback.Count == 5 && !mapstimeback.ContainsValue(0) && mapstimeback != copylastinstance)
-                            {
-                            copylastinstance = mapstimeback;
+                        if (mapstimeback.Count == 5 && !mapstimeback.ContainsValue(0) && !DictionaryEquals(mapstimeback, copylastinstance))
+                        {
+                            copylastinstance = new Dictionary<string, double>(mapstimeback);
                             string maps = "";
                             double optimaltime = 0;
                             double maptimereached = 0;
+                            int loop = 1;
                             foreach (var key in mapstimeback.Keys)
                             {
-                                optimaltime += gravmapstimes[key];
+                                optimaltime += loop == 1 ? optimalgravmapstimes[key] : gravmapstimes[key];
                                 maps += key + " ";
                                 maptimereached = mapstimeback[key];
+                                loop++;
                             }
                             string maptimereachedstring = maptimereached.ToString();
                             string optimaltimestring = optimaltime.ToString();
                             RaiseResultProcessed($"\nfinished {maps} in {maptimereachedstring.Substring(0, 2) + "." + maptimereachedstring.Substring(2, 3)} seconds.\nOptimal Time to reach is around {optimaltimestring.Substring(0, 2) + "." + optimaltimestring.Substring(2, 3)} seconds", false);
-                            mapstime.Clear();
+                            mapstimeback.Clear();
                         }
                     }
-              }
+                }
+             }
         }
-        private Dictionary<string, double> GetTimes()
+        bool DictionaryEquals(Dictionary<string, double> dict1, Dictionary<string, double> dict2)
+        {
+            if (dict1.Count != dict2.Count)
+                return false;
+
+            foreach (var pair in dict1)
+            {
+                double value;
+                if (!dict2.TryGetValue(pair.Key, out value) || value != pair.Value)
+                    return false;
+            }
+            return true;
+        }
+        private readonly object _updateLock = new object();
+        private Dictionary<string, double> GetTimes(string filename)
         {
             Dictionary<string, double> Gravtimes = new Dictionary<string, double>();
-            string[] lines = File.ReadAllLines(Path.Combine(path, "gravitytimemaps.txt"));
+            string[] lines = File.ReadAllLines(Path.Combine(path, filename));
             foreach (var line in lines)
             {
                 // Trace.WriteLine(line);
@@ -114,33 +135,30 @@ namespace GT
     {
         DataToValue chart = new DataToValue();
         private readonly object _queueLock = new object();
+        private Task<Dictionary<string, double>> _processingTask = null;
         private volatile bool _isProcessing = false;
-        public async Task<Dictionary<string, double>> EnqueueTaskAsync(string result1, Dictionary<string, double> maptime, Dictionary<string, double> bestmaptime)
+        public Task<Dictionary<string, double>> EnqueueTaskAsync(string result1, Dictionary<string, double> bestmaptime)
         {
             lock (_queueLock)
             {
-                if (_isProcessing)
+                if (_processingTask == null || _processingTask.IsCompleted || _processingTask.IsFaulted || _processingTask.IsCanceled)
                 {
-                    maptime.Clear();
-                    return maptime;
+                    _processingTask = Task.Run(() => ProcessDataAsync(result1, bestmaptime));
                 }
-                _isProcessing = true;
             }
-            try
-            {
-                maptime = chart.Data(result1, maptime, bestmaptime);
-                return maptime;
-            }
-            finally
-            {
-                _isProcessing = false;
-            }
+            return _processingTask;
+        }
+        private async Task<Dictionary<string, double>> ProcessDataAsync(string result1, Dictionary<string, double> bestmaptime)
+        {
+            Dictionary<string, double> maptime = chart.Data(result1, new Dictionary<string, double>(), bestmaptime);
+            return maptime;
         }
     }
     public class GetBitMap
     {
         System.Timers.Timer timer = new System.Timers.Timer();
-        private Bitmap screenshot;
+        private bool IsEnabled = false;
+        public double timetick = 2;
         public event Action<Bitmap> ScreenshotCaptured;
         public void TakeScreenShot(System.Windows.Controls.TextBox textbox1)
         {
@@ -148,12 +166,20 @@ namespace GT
             {
                 OnElapsedTime(textbox1);
             };
-            timer.Interval = 2000;
-            timer.Start();
+            timer.Interval = timetick * 1000;
+            if (!IsEnabled)
+            {
+                IsEnabled = true;
+                timer.Start();
+            }
         }
         public void Stoptimer()
         {
-            timer.Stop();
+            if (IsEnabled)
+            {
+                IsEnabled = false;
+                timer.Stop();
+            }
         }
         private void OnElapsedTime(System.Windows.Controls.TextBox textbox1)
         {
@@ -238,14 +264,13 @@ namespace GT
         {
             using (var engine = new TesseractEngine(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tessdata"), "eng", EngineMode.Default))
             {
+                engine.DefaultPageSegMode = PageSegMode.Auto;
                 using (var image = PixConverter.ToPix(screnshot))
                 {
                     using (var page = engine.Process(image))
                     {
                         var text = page.GetText();
                         screnshot.Dispose();
-                        image.Dispose();
-                        page.Dispose();
                         return text;
                     }
                 }
@@ -259,29 +284,35 @@ namespace GT
             string timepattern = @"[{\[\(]\d{2}[:;]\d{2}[.,]\d{3}[}\]\)]";
             char[] delimiters = new char[] { ' ', '\n', '\r', '!', ',' };
             bool containsyou = false;
+            bool containsmaps = false;
             maptimes.Clear();
+            StringBuilder sb = new StringBuilder();
             string[] words = screentext.Split(delimiters, StringSplitOptions.RemoveEmptyEntries);
-            string wordsequenz = "";
             foreach (string word in words)
             {
-                wordsequenz += word;
-                if (wordsequenz.Contains("youfinished"))
+                sb.Append(word);
+                if (sb.ToString().Contains("youfinished") && !containsyou)
                 {
                     containsyou = true;
+                }
+                if (sb.ToString().Contains("winningmaps") && !containsmaps)
+                {
+                    containsmaps = true;
                 }
                 if (Regex.IsMatch(word, timepattern))
                 {
                     Trace.WriteLine(word + " match");
                     string timestring = word.Substring(4, 2) + '.' + word.Substring(7, 3);
-                    if (maptimes.Count == 5 && maptimes.ContainsValue(0) && containsyou)
+                    if (maptimes.Count == 5 && maptimes.ContainsValue(0) && containsyou && containsmaps)
                     {
                         foreach (var key in maptimes.Keys.ToList())
                         {
                             maptimes[key] = Double.Parse(timestring);
                         }
+                        return maptimes;
                     }
                 }
-                if (gravmapstimes.ContainsKey(word) && !maptimes.ContainsKey(word))
+                if (gravmapstimes.ContainsKey(word) && !maptimes.ContainsKey(word) && maptimes.Count < 5 && containsmaps)
                 {
                     Trace.WriteLine(word + " containskey");
                     maptimes.Add(word, 0);
@@ -327,10 +358,9 @@ namespace GT
             }
             else
             {
-                StopTimer();
+                StopTimer2();
             }
         }
-
         private void StartTimer2()
         {
             if (!timer2.IsEnabled)
@@ -338,8 +368,7 @@ namespace GT
                 timer2.Start();
             }
         }
-
-        private void StopTimer()
+        private void StopTimer2()
         {
             if (timer2.IsEnabled)
             {
