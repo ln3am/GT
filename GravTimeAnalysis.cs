@@ -185,7 +185,7 @@ namespace GT
                 {
                     OnElapsedTime();
                 };
-                timer.Interval = timetick * 2000;
+                timer.Interval = timetick * 1000;
             }
             Starttimer();
         }
