@@ -251,8 +251,6 @@ namespace GT
                         0, 0, original.Width, original.Height, GraphicsUnit.Pixel, attributes);
                 }
             }
-
-            // Dispose the original bitmap if it's no longer needed
             original.Dispose();
 
             return upscaledAndGrayscale;
