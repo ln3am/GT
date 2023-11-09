@@ -14,7 +14,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Diagnostics;
 using System.Threading;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.TaskbarClock;
 
 namespace GT
 {
@@ -22,13 +21,15 @@ namespace GT
     {
         string path = AppDomain.CurrentDomain.BaseDirectory;
         //leads to GT\bin\ebug\net7.0-windows\
-        GetBitMap getmap = new GetBitMap();
+        public GetBitMap getmap = new GetBitMap();
         ProcessScreenshot process = new ProcessScreenshot();
         private string result1 = "";
         private System.Windows.Controls.TextBox textbox1;
         private System.Windows.Controls.TextBox textbox2;
         Dispatcher mdispatcher;
+        private double writespeed = 0.2;
         public event Action<string, bool> ResultProcessed;
+        public event Action<string, double, double, double> FinishedMapTimes;
         private Dictionary<string, double> gravmapstimes = new Dictionary<string, double>();
         private Dictionary<string, double> optimalgravmapstimes = new Dictionary<string, double>();
         private TaskQueueProcessor _processor = new TaskQueueProcessor();
@@ -38,7 +39,7 @@ namespace GT
             mdispatcher = maindispatcher;
             textbox1 = text1;
             textbox2 = text2;
-            getmap.Write("Service was started at " + DateTime.Now, textbox1, 0.1);
+            getmap.Write("Service was started at " + DateTime.Now, textbox1, writespeed);
             gravmapstimes = GetTimes("gravitytimemaps.txt");
             optimalgravmapstimes = GetTimes("optimaltimes.txt");
             getmap.ScreenshotCaptured += async (screenshot) =>
@@ -53,23 +54,26 @@ namespace GT
                 }
             };
             ResultProcessed += OnResultProcessed;
-            getmap.TakeScreenShot(textbox1);
+            getmap.TakeScreenShot();
         }
         public void OnStop()
         {
             getmap.Stoptimer();
-            getmap.Write("\nService was stopped at " + DateTime.Now, textbox1, 0.1);
+            getmap.Write("\nService was stopped at " + DateTime.Now, textbox1, writespeed);
         }
         private void OnResultProcessed(string result, bool istextbox1)
         {
             System.Windows.Controls.TextBox textboxx = istextbox1 ? textbox1 : textbox2;
-            mdispatcher.Invoke(() => getmap.Write(result, textboxx, 0.1));
+            mdispatcher.Invoke(() => getmap.Write(result, textboxx, writespeed));
         }
+        private readonly object qLock = new object();
         public void RaiseResultProcessed(string result, bool istextbox1)
         {
-            ResultProcessed?.Invoke(result, istextbox1);
+            lock (qLock)
+            {
+                ResultProcessed?.Invoke(result, istextbox1);
+            }
         }
-
         private async Task OnScreenshotCaptured(Bitmap screenshot)
         {
               string result = process.ProcesScreenshot(screenshot);
@@ -97,7 +101,12 @@ namespace GT
                             }
                             string maptimereachedstring = maptimereached.ToString();
                             string optimaltimestring = optimaltime.ToString();
-                            RaiseResultProcessed($"\nfinished {maps} in {maptimereachedstring.Substring(0, 2) + "." + maptimereachedstring.Substring(2, 3)} seconds.\nOptimal Time to reach is around {optimaltimestring.Substring(0, 2) + "." + optimaltimestring.Substring(2, 3)} seconds", false);
+                            RaiseResultProcessed($"\n{maps}; {maptimereached}; {optimaltimestring}", false);
+                            double timereached = Double.Parse(maptimereachedstring);
+                            double optimaltimereached = Double.Parse(optimaltimestring);
+                            double timedifference = timereached - optimaltimereached;
+                            FinishedMapTimes?.Invoke(maps, timereached, optimaltimereached, timedifference);
+                            RaiseResultProcessed($"\nNew time has been documented at {DateTime.Now}", true);
                             mapstimeback.Clear();
                         }
                     }
@@ -108,7 +117,6 @@ namespace GT
         {
             if (dict1.Count != dict2.Count)
                 return false;
-
             foreach (var pair in dict1)
             {
                 double value;
@@ -160,18 +168,26 @@ namespace GT
         private bool IsEnabled = false;
         public double timetick = 2;
         public event Action<Bitmap> ScreenshotCaptured;
-        public void TakeScreenShot(System.Windows.Controls.TextBox textbox1)
+        public void TakeManualScreenShot()
+        {
+            OnElapsedTime();
+        }   
+        public void TakeScreenShot()
         {
             timer.Elapsed += (sender, e) =>
             {
-                OnElapsedTime(textbox1);
+                OnElapsedTime();
             };
-            timer.Interval = timetick * 1000;
+            timer.Interval = 2000;
+            Starttimer();
+        }
+        public void Starttimer()
+        {              
             if (!IsEnabled)
             {
                 IsEnabled = true;
                 timer.Start();
-            }
+            }   
         }
         public void Stoptimer()
         {
@@ -181,7 +197,7 @@ namespace GT
                 timer.Stop();
             }
         }
-        private void OnElapsedTime(System.Windows.Controls.TextBox textbox1)
+        private void OnElapsedTime()
         {
             Task.Run(() =>
             {
