@@ -42,18 +42,21 @@ namespace GT
             getmap.Write("Service was started at " + DateTime.Now, textbox1, writespeed);
             gravmapstimes = GetTimes("gravitytimemaps.txt");
             optimalgravmapstimes = GetTimes("optimaltimes.txt");
-            getmap.ScreenshotCaptured += async (screenshot) =>
+            if (getmap.firststart)
             {
-                try
+                getmap.ScreenshotCaptured += async (screenshot) =>
                 {
-                    await OnScreenshotCaptured(screenshot);
-                }
-                catch (Exception ex)
-                {
-                    Trace.WriteLine($"Exception in async event handler: {ex}");
-                }
-            };
-            ResultProcessed += OnResultProcessed;
+                    try
+                    {
+                        await OnScreenshotCaptured(screenshot);
+                    }
+                    catch (Exception ex)
+                    {
+                        Trace.WriteLine($"Exception in async event handler: {ex}");
+                    }
+                };
+                ResultProcessed += OnResultProcessed;
+            }
             getmap.TakeScreenShot();
         }
         public void OnStop()
@@ -95,7 +98,9 @@ namespace GT
                             foreach (var key in mapstimeback.Keys)
                             {
                                 optimaltime += loop == 1 ? optimalgravmapstimes[key] : gravmapstimes[key];
-                                maps += key + " ";
+                                maps += key;
+                                if (loop < 5) maps += " ";
+                                
                                 maptimereached = mapstimeback[key];
                                 loop++;
                             }
@@ -132,7 +137,6 @@ namespace GT
             string[] lines = File.ReadAllLines(Path.Combine(path, filename));
             foreach (var line in lines)
             {
-                // Trace.WriteLine(line);
                 string[] lineparts = line.Split(" ");
                 Gravtimes.Add(lineparts[0], double.Parse(lineparts[1]));
             }
@@ -168,17 +172,21 @@ namespace GT
         private bool IsEnabled = false;
         public double timetick = 2;
         public event Action<Bitmap> ScreenshotCaptured;
+        public bool firststart = true;
         public void TakeManualScreenShot()
         {
             OnElapsedTime();
         }   
         public void TakeScreenShot()
         {
-            timer.Elapsed += (sender, e) =>
+            if (firststart)
             {
-                OnElapsedTime();
-            };
-            timer.Interval = 2000;
+                timer.Elapsed += (sender, e) =>
+                {
+                    OnElapsedTime();
+                };
+                timer.Interval = timetick * 2000;
+            }
             Starttimer();
         }
         public void Starttimer()
@@ -191,6 +199,7 @@ namespace GT
         }
         public void Stoptimer()
         {
+            firststart = false;
             if (IsEnabled)
             {
                 IsEnabled = false;
@@ -211,7 +220,7 @@ namespace GT
                     {
                         graphics.CopyFromScreen(bounds.Left, bounds.Top, 0, 0, new Size(captureWidth, captureHeight));
                     }
-                    using (var upscaledScreenshot = UpscaleAndGrayscaleImage(screenshot, 2.0f))
+                    using (var upscaledScreenshot = UpscaleAndGrayscaleImage(screenshot, 3.0f))
                     {
                        ScreenshotCaptured?.Invoke(upscaledScreenshot);
                     }
@@ -220,15 +229,12 @@ namespace GT
         }
         private Bitmap UpscaleAndGrayscaleImage(Bitmap original, float scaleFactor)
         {
-            var upscaled = new Bitmap((int)(original.Width * scaleFactor), (int)(original.Height * scaleFactor));
-            using (var graphics = Graphics.FromImage(upscaled))
+            var upscaledAndGrayscale = new Bitmap((int)(original.Width * scaleFactor), (int)(original.Height * scaleFactor));
+
+            using (var graphics = Graphics.FromImage(upscaledAndGrayscale))
             {
                 graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                graphics.DrawImage(original, 0, 0, upscaled.Width, upscaled.Height);
-            }
-            var grayscale = new Bitmap(upscaled.Width, upscaled.Height);
-            using (var graphics = Graphics.FromImage(grayscale))
-            {
+
                 ColorMatrix colorMatrix = new ColorMatrix(
                     new float[][]
                     {
@@ -241,12 +247,15 @@ namespace GT
                 using (ImageAttributes attributes = new ImageAttributes())
                 {
                     attributes.SetColorMatrix(colorMatrix);
-                    graphics.DrawImage(upscaled, new Rectangle(0, 0, upscaled.Width, upscaled.Height),
-                        0, 0, upscaled.Width, upscaled.Height, GraphicsUnit.Pixel, attributes);
+                    graphics.DrawImage(original, new Rectangle(0, 0, upscaledAndGrayscale.Width, upscaledAndGrayscale.Height),
+                        0, 0, original.Width, original.Height, GraphicsUnit.Pixel, attributes);
                 }
             }
-            upscaled.Dispose();
-            return grayscale;
+
+            // Dispose the original bitmap if it's no longer needed
+            original.Dispose();
+
+            return upscaledAndGrayscale;
         }
         public void Write(string message, System.Windows.Controls.TextBox textbox, double writespeed)
         {
@@ -317,20 +326,21 @@ namespace GT
                 }
                 if (Regex.IsMatch(word, timepattern))
                 {
-                    Trace.WriteLine(word + " match");
                     string timestring = word.Substring(4, 2) + '.' + word.Substring(7, 3);
                     if (maptimes.Count == 5 && maptimes.ContainsValue(0) && containsyou && containsmaps)
                     {
+                        double minuteover = double.Parse(word.Substring(2, 1));
+                        double reachedseconds = Double.Parse(timestring);
+                        if (minuteover > 0) reachedseconds += 60;
                         foreach (var key in maptimes.Keys.ToList())
                         {
-                            maptimes[key] = Double.Parse(timestring);
+                            maptimes[key] = reachedseconds;
                         }
                         return maptimes;
                     }
                 }
                 if (gravmapstimes.ContainsKey(word) && !maptimes.ContainsKey(word) && maptimes.Count < 5 && containsmaps)
                 {
-                    Trace.WriteLine(word + " containskey");
                     maptimes.Add(word, 0);
                 }
             }

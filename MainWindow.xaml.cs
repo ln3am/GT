@@ -36,10 +36,7 @@ namespace GT
         {
             string[] smaps = maps.Split(' ');
             string mapshow = "";
-            foreach (string map in smaps)
-            {
-                mapshow += map + "\n";   
-            }
+            mapshow = smaps[0] + " " + smaps[1]  + " " + smaps[2] + "\n" + smaps[3] + " " + smaps[4];
             vm1.Labels.Add(mapshow);    
           //  vm2.Labels1.Add(map);
             vm1.CollectionDifferenceTime[0].Values.Add(timedifference);
