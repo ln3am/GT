@@ -36,12 +36,12 @@ namespace GT
         {
             string[] smaps = maps.Split(' ');
             string mapshow = "";
-            mapshow = smaps[0] + " " + smaps[1]  + " " + smaps[2] + "\n" + smaps[3] + " " + smaps[4];
+            mapshow = smaps[0] + " " + smaps[1]  + "\n" + smaps[2] + " " + smaps[3] + "\n" + smaps[4];
             vm1.Labels.Add(mapshow);    
-          //  vm2.Labels1.Add(map);
             vm1.CollectionDifferenceTime[0].Values.Add(timedifference);
-          //  vm2.SeriesCollection1[0].Values.Add(times);
-          //  vm2.SeriesCollection1[1].Values.Add(optimaltimes);
+            vm1.CollectionMapTime[0].Values.Add(times);
+            vm1.CollectionMapTime[1].Values.Add(optimaltimes);
+            vm1.CollectionMapTime[2].Values.Add(times);
         }
         private void MaximizeWindow(object sender, RoutedEventArgs e)
         {
@@ -82,6 +82,7 @@ namespace GT
                 consoletext.Visibility = Visibility.Collapsed;
                 consoletextblock.Visibility = Visibility.Collapsed;
                 bordermini.Visibility = Visibility.Collapsed;
+                bordermini2.Visibility = Visibility.Visible;
             }
             else
             {
@@ -90,6 +91,7 @@ namespace GT
                 consoletext.Visibility = Visibility.Visible;
                 consoletextblock.Visibility = Visibility.Visible;
                 bordermini.Visibility = Visibility.Visible;
+                bordermini2.Visibility = Visibility.Collapsed;
             }
         }
         private void CaptureValueSpeedOnValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -98,19 +100,19 @@ namespace GT
             switch (value)
             {
                 case 1:
-                    grav.getmap.timetick = 1;
+                    grav.getmap.SetTimerInterval(1);
                     break;
                 case 2:
-                    grav.getmap.timetick = 2;
+                    grav.getmap.SetTimerInterval(2);
                     break;
                 case 3:
-                    grav.getmap.timetick = 3;
+                    grav.getmap.SetTimerInterval(3);
                     break;
                 case 4:
-                    grav.getmap.timetick = 4;
+                    grav.getmap.SetTimerInterval(4);
                     break;
                 case 5:
-                    grav.getmap.timetick = 5;
+                    grav.getmap.SetTimerInterval(5);
                     break;  
             }
         }
@@ -145,32 +147,58 @@ namespace GT
            {
                if (value > 6)
                    return Brushes.Red;
-               else if (value > 3)
+               if (value > 3)
                    return Brushes.Orange;
-               else if (value > 1)
+               if (value > 1)
                    return Brushes.Yellow;
-               else if (value > 0)
-                   return Brushes.LightBlue;
-               else
+               if (value > 0)
                    return Brushes.Green;
-           }
-                     );
+               return Brushes.LightBlue;
+           });
+            var staticMapper = Mappers.Xy<double>()
+       .X((value, index) => index)
+       .Y(value => value)
+       .Fill(value => Brushes.Green);
 
             CollectionDifferenceTime = new SeriesCollection(mapper)
             {
-                 new LineSeries 
+                 new LineSeries
             {
                 Title = "Time Difference",
                 Values = new ChartValues<double> { 0 },
                 PointGeometry = DefaultGeometries.Circle,
                 Stroke = Brushes.LightBlue,
                 PointGeometrySize = 15,
-                StrokeThickness = 2 
+                StrokeThickness = 2
             }
             };
+            CollectionMapTime = new SeriesCollection
+            {
+                 new ColumnSeries(mapper)
+                 {
+                Title = "Reached Time",
+                Values = new ChartValues<double> { 25 }
+                 },
+                 new ColumnSeries(staticMapper)
+                 {
+                Title = "Optimal Time",
+                Values = new ChartValues<double> { 25 }
+                 },
+                  new LineSeries(mapper)
+                {
+                Name = null,
+                Values = new ChartValues<double> { 25 },
+                PointGeometry = null,
+                Stroke = Brushes.LightBlue,
+                Fill = Brushes.Transparent, 
+                StrokeThickness = 2
+                }
+            };
+
             Labels = new List<string> { "Maps" };
         }
         public SeriesCollection CollectionDifferenceTime { get; set; }
+        public SeriesCollection CollectionMapTime { get; set; } 
         public List<string> Labels { get; set; }
 
         public event PropertyChangedEventHandler PropertyChanged;   

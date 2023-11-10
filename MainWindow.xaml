@@ -23,14 +23,14 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RepeatButton">
-                        <Rectangle Fill="LightBlue"  Height="5" RadiusX="5" RadiusY="5"/>
+                        <Rectangle Fill="LightBlue" Height="5" RadiusX="5" RadiusY="5"/>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
         <Style x:Key="outPutText" TargetType="{x:Type TextBox}">
             <Setter Property="Foreground" Value="CornflowerBlue"/>
-            <Setter Property="FontSize" Value="10"/>
+            <Setter Property="FontSize" Value="12"/>
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="TextAlignment" Value="Left"/>
         </Style>
@@ -134,7 +134,6 @@
                     </Grid>
 
                     <Button Style="{StaticResource buttonstyle}" x:Name="stop" Content="  Stop  "  Click="StopOnClick" HorizontalAlignment="Stretch" Height="60" Margin="10,20,10,10" Grid.Column="2" VerticalAlignment="top"/>
-
                     <Button  Style="{StaticResource buttonstyle}" x:Name="start" Content="  Start  "  Click="StartOnClick" HorizontalAlignment="Stretch" Height="60" Margin="10,20,10,10" Grid.Column="0" VerticalAlignment="top"/>
                 </Grid>
 
@@ -163,7 +162,7 @@
 
                     <Button  Style="{StaticResource buttonstyle}" x:Name="capturespeed" Content="  Capture Speed  "  Click="CaptureSpeedOnClick" HorizontalAlignment="Stretch" Height="60" Margin="10,20,10,10" Grid.Column="2" VerticalAlignment="top"/>
 
-                    <Slider x:Name="capturevaluespeed" ValueChanged="CaptureValueSpeedOnValueChanged" IsHitTestVisible="true" Grid.Column="2" Minimum="1" HorizontalAlignment="Center" VerticalAlignment="Top"  Maximum="5" Value="2" Width="140" TickFrequency="1" IsEnabled="True" AutoToolTipPlacement="BottomRight" Margin="10 95, 10, 0" IsSnapToTickEnabled="True">
+                    <Slider x:Name="capturevaluespeed" ValueChanged="CaptureValueSpeedOnValueChanged" IsHitTestVisible="true" Grid.Column="2" Minimum="1" HorizontalAlignment="Center" VerticalAlignment="Top"  Maximum="5" Value="3" Width="140" TickFrequency="1" IsEnabled="True" AutoToolTipPlacement="BottomRight" Margin="10 95, 10, 0" IsSnapToTickEnabled="True">
                         <Slider.Style>
                             <Style TargetType="Slider">
                                 <Setter Property="Template">
@@ -185,7 +184,6 @@
                                                                      BorderBrush="{TemplateBinding BorderBrush}"
                                                                          BorderThickness="{TemplateBinding BorderThickness}"
                                                                             CornerRadius="5">
-                                                                        <!-- You can add additional visual elements inside the border -->
                                                                         <TextBlock Margin="0,-5,0,0" FontWeight="Bold" Text="|||" 
                                                                          HorizontalAlignment="Center" 
                                                                          VerticalAlignment="Center" 
@@ -349,7 +347,18 @@
                 </ScrollViewer>
             </Border>
         </Grid>
-
+        <Border x:Name="bordermini2" Margin="10,150,10,60" Grid.Column="0" BorderThickness="0"  BorderBrush="LightBlue" Visibility="Collapsed">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" >
+                <lvc:CartesianChart Series="{Binding CollectionMapTime}">
+                    <lvc:CartesianChart.AxisX>
+                        <lvc:Axis Labels="{Binding Labels}"></lvc:Axis>
+                    </lvc:CartesianChart.AxisX>
+                    <lvc:CartesianChart.AxisY>
+                        <lvc:Axis MinValue="25" MaxValue="40"></lvc:Axis>
+                    </lvc:CartesianChart.AxisY>
+                </lvc:CartesianChart>
+            </ScrollViewer>
+        </Border>
         <Rectangle Fill="White" Margin="0,0,0,50" Height="1" VerticalAlignment="Bottom" />
     </Grid>
     

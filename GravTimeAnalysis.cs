@@ -106,10 +106,10 @@ namespace GT
                             }
                             string maptimereachedstring = maptimereached.ToString();
                             string optimaltimestring = optimaltime.ToString();
-                            RaiseResultProcessed($"\n{maps}; {maptimereached}; {optimaltimestring}", false);
                             double timereached = Double.Parse(maptimereachedstring);
                             double optimaltimereached = Double.Parse(optimaltimestring);
                             double timedifference = timereached - optimaltimereached;
+                            RaiseResultProcessed($"\n{maps}; {maptimereached}; {optimaltimestring}; {timedifference}", false);
                             FinishedMapTimes?.Invoke(maps, timereached, optimaltimereached, timedifference);
                             RaiseResultProcessed($"\nNew time has been documented at {DateTime.Now}", true);
                             mapstimeback.Clear();
@@ -148,7 +148,6 @@ namespace GT
         DataToValue chart = new DataToValue();
         private readonly object _queueLock = new object();
         private Task<Dictionary<string, double>> _processingTask = null;
-        private volatile bool _isProcessing = false;
         public Task<Dictionary<string, double>> EnqueueTaskAsync(string result1, Dictionary<string, double> bestmaptime)
         {
             lock (_queueLock)
@@ -170,7 +169,6 @@ namespace GT
     {
         System.Timers.Timer timer = new System.Timers.Timer();
         private bool IsEnabled = false;
-        public double timetick = 2;
         public event Action<Bitmap> ScreenshotCaptured;
         public bool firststart = true;
         public void TakeManualScreenShot()
@@ -185,9 +183,13 @@ namespace GT
                 {
                     OnElapsedTime();
                 };
-                timer.Interval = timetick * 1000;
+                SetTimerInterval(3);
             }
             Starttimer();
+        }
+        public void SetTimerInterval(double timetick)
+        {
+            timer.Interval = timetick * 1000;
         }
         public void Starttimer()
         {              
