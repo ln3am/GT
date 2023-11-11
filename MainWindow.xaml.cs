@@ -116,6 +116,12 @@ namespace GT
                     break;  
             }
         }
+        private void ClearChart()
+        {
+            vm1.Labels.Clear();
+            vm1.CollectionDifferenceTime[0].Values.Clear();
+            vm1.CollectionMapTime[0].Values.Clear();
+        }
         private bool manualcapture = false;
         private void TakeManualScreenShot()
         {
@@ -128,6 +134,7 @@ namespace GT
             {
                 capturevaluespeed.Visibility = Visibility.Collapsed;
                 grav.getmap.Stoptimer();
+                ClearChart();
             }
             else 
             {
@@ -138,28 +145,32 @@ namespace GT
     }
     public class ViewModel : INotifyPropertyChanged
     {
+        private CartesianMapper<double> mapper = new CartesianMapper<double>();
+        private CartesianMapper<double> staticMapper = new CartesianMapper<double>();
+        //change to custom class to properly use the first instajnce of mapper since it redefines itself each item
+        public bool setmapper = true;
         public ViewModel()
         {
-            var mapper = Mappers.Xy<double>()
+                mapper = Mappers.Xy<double>()
+               .X((value, index) => index)
+               .Y(value => value)
+               .Fill(value =>
+               {
+                   if (value > 6)
+                       return Brushes.Red;
+                   if (value > 3)
+                       return Brushes.Orange;
+                   if (value > 1)
+                       return Brushes.Yellow;
+                   if (value > 0)
+                       return Brushes.Green;
+                   return Brushes.LightBlue;
+               });
+                staticMapper = Mappers.Xy<double>()
            .X((value, index) => index)
            .Y(value => value)
-           .Fill(value =>
-           {
-               if (value > 6)
-                   return Brushes.Red;
-               if (value > 3)
-                   return Brushes.Orange;
-               if (value > 1)
-                   return Brushes.Yellow;
-               if (value > 0)
-                   return Brushes.Green;
-               return Brushes.LightBlue;
-           });
-            var staticMapper = Mappers.Xy<double>()
-       .X((value, index) => index)
-       .Y(value => value)
-       .Fill(value => Brushes.Green);
-
+           .Fill(value => Brushes.Green);
+            
             CollectionDifferenceTime = new SeriesCollection(mapper)
             {
                  new LineSeries
@@ -186,7 +197,7 @@ namespace GT
                  },
                   new LineSeries(mapper)
                 {
-                Name = null,
+                Title = null,
                 Values = new ChartValues<double> { 25 },
                 PointGeometry = null,
                 Stroke = Brushes.LightBlue,
@@ -194,7 +205,6 @@ namespace GT
                 StrokeThickness = 2
                 }
             };
-
             Labels = new List<string> { "Maps" };
         }
         public SeriesCollection CollectionDifferenceTime { get; set; }

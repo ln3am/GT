@@ -39,7 +39,7 @@ namespace GT
             mdispatcher = maindispatcher;
             textbox1 = text1;
             textbox2 = text2;
-            getmap.Write("Service was started at " + DateTime.Now, textbox1, writespeed);
+            getmap.Write("\nService was started at " + DateTime.Now, textbox1, writespeed, true);
             gravmapstimes = GetTimes("gravitytimemaps.txt");
             optimalgravmapstimes = GetTimes("optimaltimes.txt");
             if (getmap.firststart)
@@ -62,12 +62,13 @@ namespace GT
         public void OnStop()
         {
             getmap.Stoptimer();
-            getmap.Write("\nService was stopped at " + DateTime.Now, textbox1, writespeed);
+            getmap.Write("\nService was stopped at " + DateTime.Now, textbox1, writespeed, true);
+            
         }
         private void OnResultProcessed(string result, bool istextbox1)
         {
             System.Windows.Controls.TextBox textboxx = istextbox1 ? textbox1 : textbox2;
-            mdispatcher.Invoke(() => getmap.Write(result, textboxx, writespeed));
+            mdispatcher.Invoke(() => getmap.Write(result, textboxx, writespeed, istextbox1));
         }
         private readonly object qLock = new object();
         public void RaiseResultProcessed(string result, bool istextbox1)
@@ -82,8 +83,8 @@ namespace GT
               string result = process.ProcesScreenshot(screenshot);
               if (!(result.ToLower() == result1))
               {
-                    result1 = result.ToLower();
-                if (result1.Contains("you finished") && result1.Contains("winning maps"))
+                   result1 = result.ToLower();
+                if (result1.Contains("you finished"))
                 {
                     Dictionary<string, double> mapstimeback = await _processor.EnqueueTaskAsync(result1, gravmapstimes);
                     lock (_updateLock)
@@ -104,15 +105,23 @@ namespace GT
                                 maptimereached = mapstimeback[key];
                                 loop++;
                             }
-                            string maptimereachedstring = maptimereached.ToString();
-                            string optimaltimestring = optimaltime.ToString();
-                            double timereached = Double.Parse(maptimereachedstring);
-                            double optimaltimereached = Double.Parse(optimaltimestring);
-                            double timedifference = timereached - optimaltimereached;
-                            RaiseResultProcessed($"\n{maps}; {maptimereached}; {optimaltimestring}; {timedifference}", false);
-                            FinishedMapTimes?.Invoke(maps, timereached, optimaltimereached, timedifference);
+                            maptimereached = ErrorCheck(maptimereached, optimaltime, 1);
+                            maptimereached = ErrorCheck(maptimereached, optimaltime, 3);
+                            double timedifference = maptimereached - optimaltime;
+                            RaiseResultProcessed($"\n{maps}; {maptimereached}; {optimaltime}; {timedifference}", false);
+                            FinishedMapTimes?.Invoke(maps, maptimereached, optimaltime, timedifference);
                             RaiseResultProcessed($"\nNew time has been documented at {DateTime.Now}", true);
                             mapstimeback.Clear();
+                            Double ErrorCheck(Double maptimereached, Double optimaltime, int index)
+                            {
+                                string checkforerror = maptimereached.ToString();
+                                if (checkforerror.Substring(index, 1) == "7")
+                                {
+                                    Double newtime = Double.Parse(checkforerror.Substring(index, 1).Replace("7", "1"));
+                                    if (newtime > optimaltime - 0.5) return newtime;
+                                }
+                                return maptimereached;
+                            }
                         }
                     }
                 }
@@ -167,6 +176,8 @@ namespace GT
     }
     public class GetBitMap
     {
+
+        string path = AppDomain.CurrentDomain.BaseDirectory + "\\Logs";
         System.Timers.Timer timer = new System.Timers.Timer();
         private bool IsEnabled = false;
         public event Action<Bitmap> ScreenshotCaptured;
@@ -222,7 +233,7 @@ namespace GT
                     {
                         graphics.CopyFromScreen(bounds.Left, bounds.Top, 0, 0, new Size(captureWidth, captureHeight));
                     }
-                    using (var upscaledScreenshot = UpscaleAndGrayscaleImage(screenshot, 3.0f))
+                    using (var upscaledScreenshot = UpscaleAndGrayscaleImage(screenshot, 2.0f))
                     {
                        ScreenshotCaptured?.Invoke(upscaledScreenshot);
                     }
@@ -236,48 +247,56 @@ namespace GT
             using (var graphics = Graphics.FromImage(upscaledAndGrayscale))
             {
                 graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-
-                ColorMatrix colorMatrix = new ColorMatrix(
-                    new float[][]
-                    {
-                new float[] {.3f, .3f, .3f, 0, 0},
-                new float[] {.59f, .59f, .59f, 0, 0},
-                new float[] {.11f, .11f, .11f, 0, 0},
-                new float[] {0, 0, 0, 1, 0},
-                new float[] {0, 0, 0, 0, 1}
-                    });
-                using (ImageAttributes attributes = new ImageAttributes())
-                {
-                    attributes.SetColorMatrix(colorMatrix);
-                    graphics.DrawImage(original, new Rectangle(0, 0, upscaledAndGrayscale.Width, upscaledAndGrayscale.Height),
-                        0, 0, original.Width, original.Height, GraphicsUnit.Pixel, attributes);
-                }
+                graphics.DrawImage(original, new Rectangle(0, 0, upscaledAndGrayscale.Width, upscaledAndGrayscale.Height));
             }
+
+            Rectangle rect = new Rectangle(0, 0, upscaledAndGrayscale.Width, upscaledAndGrayscale.Height);
+            System.Drawing.Imaging.BitmapData bmpData =
+                upscaledAndGrayscale.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadWrite,
+                upscaledAndGrayscale.PixelFormat);
+            IntPtr ptr = bmpData.Scan0;
+
+            int bytes = Math.Abs(bmpData.Stride) * upscaledAndGrayscale.Height;
+            byte[] rgbValues = new byte[bytes];
+
+            System.Runtime.InteropServices.Marshal.Copy(ptr, rgbValues, 0, bytes);
+            for (int i = 0; i < rgbValues.Length; i += 4)
+            {
+                byte gray = (byte)(rgbValues[i] * 0.11 + rgbValues[i + 1] * 0.59 + rgbValues[i + 2] * 0.3);
+                rgbValues[i] = rgbValues[i + 1] = rgbValues[i + 2] = gray;
+            }
+
+            System.Runtime.InteropServices.Marshal.Copy(rgbValues, 0, ptr, bytes);
+
+            upscaledAndGrayscale.UnlockBits(bmpData);
+
             original.Dispose();
 
             return upscaledAndGrayscale;
         }
-        public void Write(string message, System.Windows.Controls.TextBox textbox, double writespeed)
+        public void Write(string message, System.Windows.Controls.TextBox textbox, double writespeed, bool txtbx2)
         {
             ControlWriter cw = new ControlWriter(textbox, writespeed);
-            string path = AppDomain.CurrentDomain.BaseDirectory + "\\Logs";
-            if (!Directory.Exists(path))
+            if (!txtbx2)
             {
-                Directory.CreateDirectory(path);
-            }
-            string filepath = AppDomain.CurrentDomain.BaseDirectory + "\\Logs\\ServiceLog_" + DateTime.Now.Date.ToShortDateString().Replace('/', '_') + ".txt";
-            if (!File.Exists(filepath))
-            {
-                using (StreamWriter sw = File.CreateText(filepath))
+                if (!Directory.Exists(path))
                 {
-                    sw.WriteLine(message);
+                    Directory.CreateDirectory(path);
                 }
-            }
-            else
-            {
-                using (StreamWriter sw = File.AppendText(filepath))
+                string filepath = AppDomain.CurrentDomain.BaseDirectory + "\\Logs\\ServiceLog_" + DateTime.Now.Date.ToShortDateString().Replace('/', '_') + ".txt";
+                if (!File.Exists(filepath))
                 {
-                    sw.WriteLine(message);
+                    using (StreamWriter sw = File.CreateText(filepath))
+                    {
+                        sw.WriteLine(message);
+                    }
+                }
+                else
+                {
+                    using (StreamWriter sw = File.AppendText(filepath))
+                    {
+                        sw.WriteLine(message);
+                    }
                 }
             }
             cw.Write(message);
@@ -289,6 +308,7 @@ namespace GT
         {
             using (var engine = new TesseractEngine(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tessdata"), "eng", EngineMode.Default))
             {
+                engine.SetVariable("user_words_suffix", "user-words");
                 engine.DefaultPageSegMode = PageSegMode.Auto;
                 using (var image = PixConverter.ToPix(screnshot))
                 {
@@ -304,45 +324,47 @@ namespace GT
     }
     public class DataToValue
     {
+        string timepattern = @"\d{2}[.]\d{3}";
+        char[] delimiters = new char[] { ' ', '\n', ',', '!', ';', ':', '[', ']', '(', ')' };
         public Dictionary<string, double> Data(string screentext, Dictionary<string, double> maptimes, Dictionary<string, double> gravmapstimes)
         {
-            string timepattern = @"[{\[\(]\d{2}[:;]\d{2}[.,]\d{3}[}\]\)]";
-            char[] delimiters = new char[] { ' ', '\n', '\r', '!', ',' };
+            string previousstring = "";
             bool containsyou = false;
-            bool containsmaps = false;
             maptimes.Clear();
+            List<string> mapkeys = new List<string>();
             StringBuilder sb = new StringBuilder();
             string[] words = screentext.Split(delimiters, StringSplitOptions.RemoveEmptyEntries);
             foreach (string word in words)
             {
-                sb.Append(word);
-                if (sb.ToString().Contains("youfinished") && !containsyou)
-                {
-                    containsyou = true;
-                }
-                if (sb.ToString().Contains("winningmaps") && !containsmaps)
-                {
-                    containsmaps = true;
-                }
-                if (Regex.IsMatch(word, timepattern))
-                {
-                    string timestring = word.Substring(4, 2) + '.' + word.Substring(7, 3);
-                    if (maptimes.Count == 5 && maptimes.ContainsValue(0) && containsyou && containsmaps)
+                    sb.Append(word);
+                    if (sb.ToString().Contains("youfinished") && !containsyou)
                     {
-                        double minuteover = double.Parse(word.Substring(2, 1));
-                        double reachedseconds = Double.Parse(timestring);
-                        if (minuteover > 0) reachedseconds += 60;
-                        foreach (var key in maptimes.Keys.ToList())
-                        {
-                            maptimes[key] = reachedseconds;
-                        }
-                        return maptimes;
+                        containsyou = true;
                     }
-                }
-                if (gravmapstimes.ContainsKey(word) && !maptimes.ContainsKey(word) && maptimes.Count < 5 && containsmaps)
-                {
-                    maptimes.Add(word, 0);
-                }
+                    if (Regex.IsMatch(word, timepattern) && maptimes.Count == 5 && maptimes.ContainsValue(0) && containsyou)
+                    {
+                            double minuteover = double.Parse(previousstring.Substring(1, 1));
+                            double reachedseconds = Double.Parse(word);
+                            if (minuteover > 0) reachedseconds += 60;
+                            foreach (var key in maptimes.Keys.ToList())
+                            {
+                                maptimes[key] = reachedseconds;
+                            }
+                            return maptimes;
+                    }
+                    if (gravmapstimes.ContainsKey(word) && !maptimes.ContainsKey(word))
+                    {
+                        if (maptimes.Count == 5)
+                        {
+                        string firstkey = mapkeys[0];
+                        maptimes.Remove(firstkey);
+                        mapkeys.Remove(firstkey);
+                        }
+                        mapkeys.Add(word);
+                        maptimes.Add(word, 0);
+                    }
+                    previousstring = word;
+                
             }
             return maptimes;
         }
