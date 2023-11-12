@@ -336,7 +336,7 @@
             </Grid>
             <Border x:Name="bordermini" Margin="100,120,5,80" Grid.Column="0" BorderThickness="4" BorderBrush="LightBlue">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" >
-                    <lvc:CartesianChart Series="{Binding CollectionDifferenceTime}">
+                    <lvc:CartesianChart Series="{Binding CollectionDifferenceTime}" MaxWidth="1500">
                         <lvc:CartesianChart.AxisX>
                             <lvc:Axis Labels="{Binding Labels}"></lvc:Axis>
                         </lvc:CartesianChart.AxisX>
@@ -349,7 +349,7 @@
         </Grid>
         <Border x:Name="bordermini2" Margin="10,150,10,60" Grid.Column="0" BorderThickness="0"  BorderBrush="LightBlue" Visibility="Collapsed">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" >
-                <lvc:CartesianChart Series="{Binding CollectionMapTime}">
+                <lvc:CartesianChart Series="{Binding CollectionMapTime}" MaxWidth="1500">
                     <lvc:CartesianChart.AxisX>
                         <lvc:Axis Labels="{Binding Labels}"></lvc:Axis>
                     </lvc:CartesianChart.AxisX>

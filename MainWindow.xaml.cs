@@ -64,7 +64,7 @@ namespace GT
         }
         private void StartOnClick(object sender, RoutedEventArgs e)
         {
-            grav.FinishedMapTimes += VisualizeData;
+            grav.getinfo.FinishedMapTimes += VisualizeData;
             grav.OnStart(outputTextBox, outputFalseText, Dispatcher);
         }
         private void StopOnClick(object sender, RoutedEventArgs e)

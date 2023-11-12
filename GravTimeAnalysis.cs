@@ -21,69 +21,94 @@ namespace GT
     {
         string path = AppDomain.CurrentDomain.BaseDirectory;
         //leads to GT\bin\ebug\net7.0-windows\
-        public GetBitMap getmap = new GetBitMap();
-        ProcessScreenshot process = new ProcessScreenshot();
-        private string result1 = "";
+        public GetBitMapTimer getmap = new GetBitMapTimer();
+        public GetInformation getinfo = new GetInformation();
         private System.Windows.Controls.TextBox textbox1;
         private System.Windows.Controls.TextBox textbox2;
         Dispatcher mdispatcher;
         private double writespeed = 0.2;
-        public event Action<string, bool> ResultProcessed;
-        public event Action<string, double, double, double> FinishedMapTimes;
         private Dictionary<string, double> gravmapstimes = new Dictionary<string, double>();
         private Dictionary<string, double> optimalgravmapstimes = new Dictionary<string, double>();
-        private TaskQueueProcessor _processor = new TaskQueueProcessor();
-        private Dictionary<string, double> copylastinstance = new Dictionary<string, double>();
+      
         public void OnStart(System.Windows.Controls.TextBox text1, System.Windows.Controls.TextBox text2, Dispatcher maindispatcher)
         {
             mdispatcher = maindispatcher;
             textbox1 = text1;
             textbox2 = text2;
-            getmap.Write("\nService was started at " + DateTime.Now, textbox1, writespeed, true);
-            gravmapstimes = GetTimes("gravitytimemaps.txt");
-            optimalgravmapstimes = GetTimes("optimaltimes.txt");
+            Write("\nService was started at " + DateTime.Now, textbox1, writespeed, true);
+            gravmapstimes = getinfo.GetTimes("gravitytimemaps.txt", path);
+            optimalgravmapstimes = getinfo.GetTimes("optimaltimes.txt", path);
             if (getmap.firststart)
             {
                 getmap.ScreenshotCaptured += async (screenshot) =>
                 {
                     try
                     {
-                        await OnScreenshotCaptured(screenshot);
+                        await getinfo.OnScreenshotCaptured(screenshot, gravmapstimes, optimalgravmapstimes);
                     }
                     catch (Exception ex)
                     {
                         Trace.WriteLine($"Exception in async event handler: {ex}");
                     }
                 };
-                ResultProcessed += OnResultProcessed;
+                getinfo.ResultProcessed += OnResultProcessed;
             }
             getmap.TakeScreenShot();
         }
         public void OnStop()
         {
             getmap.Stoptimer();
-            getmap.Write("\nService was stopped at " + DateTime.Now, textbox1, writespeed, true);
+            Write("\nService was stopped at " + DateTime.Now, textbox1, writespeed, true);
             
         }
         private void OnResultProcessed(string result, bool istextbox1)
         {
             System.Windows.Controls.TextBox textboxx = istextbox1 ? textbox1 : textbox2;
-            mdispatcher.Invoke(() => getmap.Write(result, textboxx, writespeed, istextbox1));
+            mdispatcher.Invoke(() => Write(result, textboxx, writespeed, istextbox1));
         }
-        private readonly object qLock = new object();
-        public void RaiseResultProcessed(string result, bool istextbox1)
+        public void Write(string message, System.Windows.Controls.TextBox textbox, double writespeed, bool txtbx2)
         {
-            lock (qLock)
+            ControlWriter cw = new ControlWriter(textbox, writespeed);
+            if (!txtbx2)
             {
-                ResultProcessed?.Invoke(result, istextbox1);
+                if (!Directory.Exists(path))
+                {
+                    Directory.CreateDirectory(path);
+                }
+                string filepath = AppDomain.CurrentDomain.BaseDirectory + "\\Logs\\ServiceLog_" + DateTime.Now.Date.ToShortDateString().Replace('/', '_') + ".txt";
+                if (!File.Exists(filepath))
+                {
+                    using (StreamWriter sw = File.CreateText(filepath))
+                    {
+                        sw.WriteLine(message);
+                    }
+                }
+                else
+                {
+                    using (StreamWriter sw = File.AppendText(filepath))
+                    {
+                        sw.WriteLine(message);
+                    }
+                }
             }
+            cw.Write(message);
         }
-        private async Task OnScreenshotCaptured(Bitmap screenshot)
+    }
+    public class GetInformation
+    {
+        public event Action<string, double, double, double> FinishedMapTimes;
+        private readonly object _updateLock = new object();
+        private string result1 = "";
+        public event Action<string, bool> ResultProcessed;
+        private Dictionary<string, double> copylastinstance = new Dictionary<string, double>();
+        ProcessScreenshot process = new ProcessScreenshot();
+        private TaskQueueProcessor _processor = new TaskQueueProcessor();
+        public async Task OnScreenshotCaptured(Bitmap screenshot, Dictionary<string, double> gravmapstimes, Dictionary<string, double> optimalgravmapstimes)
         {
-              string result = process.ProcesScreenshot(screenshot);
-              if (!(result.ToLower() == result1))
-              {
-                   result1 = result.ToLower();
+            string result = process.ProcesScreenshot(screenshot);
+            if (!(result.ToLower() == result1))
+            {
+                result1 = result.ToLower();
                 if (result1.Contains("you finished"))
                 {
                     Dictionary<string, double> mapstimeback = await _processor.EnqueueTaskAsync(result1, gravmapstimes);
@@ -91,7 +116,6 @@ namespace GT
                     {
                         if (mapstimeback.Count == 5 && !mapstimeback.ContainsValue(0) && !DictionaryEquals(mapstimeback, copylastinstance))
                         {
-                            copylastinstance = new Dictionary<string, double>(mapstimeback);
                             string maps = "";
                             double optimaltime = 0;
                             double maptimereached = 0;
@@ -101,12 +125,15 @@ namespace GT
                                 optimaltime += loop == 1 ? optimalgravmapstimes[key] : gravmapstimes[key];
                                 maps += key;
                                 if (loop < 5) maps += " ";
-                                
+
                                 maptimereached = mapstimeback[key];
                                 loop++;
                             }
                             maptimereached = ErrorCheck(maptimereached, optimaltime, 1);
                             maptimereached = ErrorCheck(maptimereached, optimaltime, 3);
+                            maptimereached = ErrorCheck(maptimereached, optimaltime, 4);
+                            maptimereached = ErrorCheck(maptimereached, optimaltime, 5);
+                            copylastinstance = new Dictionary<string, double>(mapstimeback);
                             double timedifference = maptimereached - optimaltime;
                             RaiseResultProcessed($"\n{maps}; {maptimereached}; {optimaltime}; {timedifference}", false);
                             FinishedMapTimes?.Invoke(maps, maptimereached, optimaltime, timedifference);
@@ -117,30 +144,38 @@ namespace GT
                                 string checkforerror = maptimereached.ToString();
                                 if (checkforerror.Substring(index, 1) == "7")
                                 {
-                                    Double newtime = Double.Parse(checkforerror.Substring(index, 1).Replace("7", "1"));
+                                    string convertback = checkforerror.Substring(0, index) + "1" + checkforerror.Substring(index + 1);
+                                    Double newtime = Double.Parse(convertback);
                                     if (newtime > optimaltime - 0.5) return newtime;
                                 }
                                 return maptimereached;
                             }
                         }
+                        bool DictionaryEquals(Dictionary<string, double> dict1, Dictionary<string, double> dict2)
+                        {
+                            if (dict1.Count != dict2.Count)
+                                return false;
+                            foreach (var pair in dict1)
+                            {
+                                double value;
+                                if (!dict2.TryGetValue(pair.Key, out value) || value != pair.Value)
+                                    return false;
+                            }
+                            return true;
+                        }
                     }
                 }
-             }
-        }
-        bool DictionaryEquals(Dictionary<string, double> dict1, Dictionary<string, double> dict2)
-        {
-            if (dict1.Count != dict2.Count)
-                return false;
-            foreach (var pair in dict1)
-            {
-                double value;
-                if (!dict2.TryGetValue(pair.Key, out value) || value != pair.Value)
-                    return false;
             }
-            return true;
         }
-        private readonly object _updateLock = new object();
-        private Dictionary<string, double> GetTimes(string filename)
+        private readonly object qLock = new object();
+        public void RaiseResultProcessed(string result, bool istextbox1)
+        {
+            lock (qLock)
+            {
+                ResultProcessed?.Invoke(result, istextbox1);
+            }
+        }
+        public Dictionary<string, double> GetTimes(string filename, string path)
         {
             Dictionary<string, double> Gravtimes = new Dictionary<string, double>();
             string[] lines = File.ReadAllLines(Path.Combine(path, filename));
@@ -152,31 +187,8 @@ namespace GT
             return Gravtimes;
         }
     }
-    public class TaskQueueProcessor
+    public class GetBitMapTimer
     {
-        DataToValue chart = new DataToValue();
-        private readonly object _queueLock = new object();
-        private Task<Dictionary<string, double>> _processingTask = null;
-        public Task<Dictionary<string, double>> EnqueueTaskAsync(string result1, Dictionary<string, double> bestmaptime)
-        {
-            lock (_queueLock)
-            {
-                if (_processingTask == null || _processingTask.IsCompleted || _processingTask.IsFaulted || _processingTask.IsCanceled)
-                {
-                    _processingTask = Task.Run(() => ProcessDataAsync(result1, bestmaptime));
-                }
-            }
-            return _processingTask;
-        }
-        private async Task<Dictionary<string, double>> ProcessDataAsync(string result1, Dictionary<string, double> bestmaptime)
-        {
-            Dictionary<string, double> maptime = chart.Data(result1, new Dictionary<string, double>(), bestmaptime);
-            return maptime;
-        }
-    }
-    public class GetBitMap
-    {
-
         string path = AppDomain.CurrentDomain.BaseDirectory + "\\Logs";
         System.Timers.Timer timer = new System.Timers.Timer();
         private bool IsEnabled = false;
@@ -185,7 +197,7 @@ namespace GT
         public void TakeManualScreenShot()
         {
             OnElapsedTime();
-        }   
+        }
         public void TakeScreenShot()
         {
             if (firststart)
@@ -203,12 +215,12 @@ namespace GT
             timer.Interval = timetick * 1000;
         }
         public void Starttimer()
-        {              
+        {
             if (!IsEnabled)
             {
                 IsEnabled = true;
                 timer.Start();
-            }   
+            }
         }
         public void Stoptimer()
         {
@@ -223,9 +235,9 @@ namespace GT
         {
             Task.Run(() =>
             {
-            Rectangle bounds = Screen.PrimaryScreen.Bounds;
-            int captureWidth = bounds.Width;
-            int captureHeight = bounds.Height;
+                Rectangle bounds = Screen.PrimaryScreen.Bounds;
+                int captureWidth = bounds.Width;
+                int captureHeight = bounds.Height;
 
                 using (Bitmap screenshot = new Bitmap(captureWidth, captureHeight))
                 {
@@ -235,7 +247,7 @@ namespace GT
                     }
                     using (var upscaledScreenshot = UpscaleAndGrayscaleImage(screenshot, 2.0f))
                     {
-                       ScreenshotCaptured?.Invoke(upscaledScreenshot);
+                        ScreenshotCaptured?.Invoke(upscaledScreenshot);
                     }
                 }
             });
@@ -274,33 +286,7 @@ namespace GT
 
             return upscaledAndGrayscale;
         }
-        public void Write(string message, System.Windows.Controls.TextBox textbox, double writespeed, bool txtbx2)
-        {
-            ControlWriter cw = new ControlWriter(textbox, writespeed);
-            if (!txtbx2)
-            {
-                if (!Directory.Exists(path))
-                {
-                    Directory.CreateDirectory(path);
-                }
-                string filepath = AppDomain.CurrentDomain.BaseDirectory + "\\Logs\\ServiceLog_" + DateTime.Now.Date.ToShortDateString().Replace('/', '_') + ".txt";
-                if (!File.Exists(filepath))
-                {
-                    using (StreamWriter sw = File.CreateText(filepath))
-                    {
-                        sw.WriteLine(message);
-                    }
-                }
-                else
-                {
-                    using (StreamWriter sw = File.AppendText(filepath))
-                    {
-                        sw.WriteLine(message);
-                    }
-                }
-            }
-            cw.Write(message);
-        }
+        
     }
     public class ProcessScreenshot
     {
@@ -322,6 +308,28 @@ namespace GT
             }
         }
     }
+    public class TaskQueueProcessor
+    {
+        DataToValue chart = new DataToValue();
+        private readonly object _queueLock = new object();
+        private Task<Dictionary<string, double>> _processingTask = null;
+        public Task<Dictionary<string, double>> EnqueueTaskAsync(string result1, Dictionary<string, double> bestmaptime)
+        {
+            lock (_queueLock)
+            {
+                if (_processingTask == null || _processingTask.IsCompleted || _processingTask.IsFaulted || _processingTask.IsCanceled)
+                {
+                    _processingTask = Task.Run(() => ProcessDataAsync(result1, bestmaptime));
+                }
+            }
+            return _processingTask;
+        }
+        private async Task<Dictionary<string, double>> ProcessDataAsync(string result1, Dictionary<string, double> bestmaptime)
+        {
+            Dictionary<string, double> maptime = chart.Data(result1, new Dictionary<string, double>(), bestmaptime);
+            return maptime;
+        }
+    }
     public class DataToValue
     {
         string timepattern = @"\d{2}[.]\d{3}";
@@ -330,14 +338,28 @@ namespace GT
         {
             string previousstring = "";
             bool containsyou = false;
+            bool finishCountOnScreen = false;
             maptimes.Clear();
             List<string> mapkeys = new List<string>();
             StringBuilder sb = new StringBuilder();
+            int countfinish = Regex.Matches("you finished", Regex.Escape(screentext)).Count;
+            int finishcount = 1;
+            if (countfinish > finishcount) finishCountOnScreen = true;
             string[] words = screentext.Split(delimiters, StringSplitOptions.RemoveEmptyEntries);
             foreach (string word in words)
             {
+                    if (finishCountOnScreen) 
+                    {
+                        if (previousstring + word == "youfinished") 
+                        {
+                            finishcount++;
+                            if (finishcount == countfinish) finishCountOnScreen = false;
+                        }
+                        previousstring = word;
+                        continue;
+                    }
                     sb.Append(word);
-                    if (sb.ToString().Contains("youfinished") && !containsyou)
+                    if (previousstring + word == "youfinished" && !containsyou)
                     {
                         containsyou = true;
                     }
