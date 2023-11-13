@@ -42,6 +42,7 @@ namespace GT
             vm1.CollectionMapTime[0].Values.Add(times);
             vm1.CollectionMapTime[1].Values.Add(optimaltimes);
             vm1.CollectionMapTime[2].Values.Add(times);
+            vm1.CollectionMapTime[3].Values.Add(optimaltimes);
         }
         private void MaximizeWindow(object sender, RoutedEventArgs e)
         {
@@ -145,28 +146,32 @@ namespace GT
     }
     public class ViewModel : INotifyPropertyChanged
     {
-        private CartesianMapper<double> mapper = new CartesianMapper<double>();
-        private CartesianMapper<double> staticMapper = new CartesianMapper<double>();
         //change to custom class to properly use the first instajnce of mapper since it redefines itself each item
-        public bool setmapper = true;
         public ViewModel()
         {
-                mapper = Mappers.Xy<double>()
+                var mapper = Mappers.Xy<double>()
                .X((value, index) => index)
                .Y(value => value)
                .Fill(value =>
                {
-                   if (value > 6)
-                       return Brushes.Red;
-                   if (value > 3)
-                       return Brushes.Orange;
-                   if (value > 1)
-                       return Brushes.Yellow;
-                   if (value > 0)
-                       return Brushes.Green;
+                   if (value > 6) return Brushes.Red;
+                   if (value > 3) return Brushes.Orange;
+                   if (value > 1) return Brushes.Yellow;
+                   if (value > 0) return Brushes.Green;
                    return Brushes.LightBlue;
                });
-                staticMapper = Mappers.Xy<double>()
+            var mapperfortimes = Mappers.Xy<double>()
+              .X((value, index) => index)
+              .Y(value => value)
+              .Fill(value =>
+              {
+                  if (value > 40) return Brushes.Red;
+                  if (value > 35) return Brushes.Orange;
+                  if (value > 33) return Brushes.Yellow;
+                  if (value > 30) return Brushes.Green;
+                  return Brushes.LightBlue;
+              });
+            var staticMapper = Mappers.Xy<double>()
            .X((value, index) => index)
            .Y(value => value)
            .Fill(value => Brushes.Green);
@@ -185,23 +190,32 @@ namespace GT
             };
             CollectionMapTime = new SeriesCollection
             {
-                 new ColumnSeries(mapper)
+                 new ColumnSeries(mapperfortimes)
                  {
                 Title = "Reached Time",
                 Values = new ChartValues<double> { 25 }
                  },
-                 new ColumnSeries(staticMapper)
+                 new ColumnSeries(mapperfortimes)
                  {
                 Title = "Optimal Time",
                 Values = new ChartValues<double> { 25 }
                  },
-                  new LineSeries(mapper)
+                  new LineSeries(mapperfortimes)
                 {
                 Title = null,
                 Values = new ChartValues<double> { 25 },
                 PointGeometry = null,
                 Stroke = Brushes.LightBlue,
                 Fill = Brushes.Transparent, 
+                StrokeThickness = 2
+                },
+                   new LineSeries(mapperfortimes)
+                {
+                Title = null,
+                Values = new ChartValues<double> { 25 },
+                PointGeometry = null,
+                Stroke = Brushes.LightBlue,
+                Fill = Brushes.Transparent,
                 StrokeThickness = 2
                 }
             };
